@@ -1,0 +1,452 @@
+---
+author: "K. Fleetwood"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+title: "Baseline characteristics table for NSTEMI"
+---
+  
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+
+## required packages
+library(tidyverse)
+library(DBI)
+library(dbplyr)
+library(dplyr)
+library(janitor)
+library(knitr)
+library(arsenal)
+library(lubridate)
+
+ccu046_folder <- "~/collab/CCU046"
+
+ccu046_01_folder <- file.path(ccu046_folder, "CCU046_01")
+bc_folder <- file.path(ccu046_01_folder, "baseline_characteristics")
+
+cohort_folder <- file.path(ccu046_folder, "CCU046_02", "processed_data")
+
+r_folder <- file.path(ccu046_folder, "r")
+# Additional tableby functions to help with rounding to 5
+source(file.path(r_folder, "tableby_functions.R"))  
+# Additional functions to help with rounding to 5
+source(file.path(r_folder, "output_functions.R")) 
+
+```
+
+```{r load_data, include=FALSE}
+
+cohort <- readRDS(file = file.path(cohort_folder, "01_cohort.rds"))
+
+st_deviation_no <- 
+  c("No acute changes", "Left bundle branch block", "T wave changes only",
+    "Other acute abnormality")
+cohort <- 
+  cohort %>%
+  mutate(
+    st_deviation = 
+      case_when(
+        ecg %in% st_deviation_no  ~ "No",
+        ecg %in% c("ST segment elevation", "ST segment depression") ~ "Yes",
+        is.na(ecg) ~ as.character(NA)
+      ), 
+    crt_log = log(creatinine)
+  )
+
+
+labels(cohort) <-
+  c(
+    crt_log = "log [Creatinine (micromol/L)]",
+    st_deviation = "ST deviation"
+  )
+
+# Individual secondary prevention medications
+
+med_lvls <-
+  c("Yes", "Contraindicated", "Patient declined treatment", "Not applicable", 
+    "Not indicated", "No")
+
+cohort <- 
+  cohort %>% 
+  mutate(
+    aspirin = substring(discharged_on_aspirin, 4, 100),
+    aspirin = ifelse(aspirin %in% "Unknown", as.character(NA), aspirin),
+    aspirin = factor(aspirin, levels = med_lvls),
+    # 
+    bb = substring(discharged_on_beta_blocker, 4, 100),
+    bb = ifelse(bb %in% "Unknown", as.character(NA), bb),
+    bb = factor(bb, levels = med_lvls), 
+    # 
+    statin = substring(discharged_on_statin, 4, 100),
+    statin = ifelse(statin %in% "Unknown", as.character(NA), statin),
+    statin = factor(statin, levels = med_lvls), 
+    #
+    ace = substring(discharged_on_ace_i, 4, 100),
+    ace = ifelse(ace %in% "Unknown", as.character(NA), ace),
+    ace = factor(ace, levels = med_lvls), 
+    #
+    thieno = substring(discharged_on_thieno_inhibitor, 4, 100), 
+    thieno = ifelse(thieno %in% "Unknown", as.character(NA), thieno),
+    thieno = factor(thieno, levels = med_lvls), 
+    #
+    tica   = substring(discharged_on_ticagrelor, 4, 100), 
+    tica = ifelse(tica %in% "Unknown", as.character(NA), tica),
+    tica = factor(tica, levels = med_lvls)
+  )
+
+labels(cohort) <- 
+  c(
+    aspirin = "Discharged on aspirin",
+    bb      = "Discharged on beta blocker",
+    statin  = "Discharged on statin",
+    ace     = "Discharged on ACE inhibitor",
+    thieno  = "Discharged on thienopyridine",
+    tica    = "Discharged on ticagrelor",
+    angiogram_eligibility = "Angiogram eligibility",
+    angiogram_receipt     = "Angiogram receipt",
+    angio_within_72h      = "Angiogram within 72 hrs"
+  )
+
+```
+
+# Background
+This CCU046_01 output includes descriptive tables prepared for a publication about severe mental illness and receipt of care following myocardial infarction.The output has been created from Myocardial Ischaemia National Audit Project (MINAP) data linked to HES, GDPPR, death records and COVID-19 surveillance data.
+
+# Key cohorts
+
+```{r nstemi_key, results = "asis"}
+
+# Full cohort
+nstemi <- filter(cohort, mi_type %in% "NSTEMI")
+nstemi_n <- nstemi %>% nrow()
+
+# Define complete cases flags
+nstemi <- 
+  nstemi %>%
+  mutate(
+    cc = !is.na(imd_2019)   & !is.na(ethnic_5)       & !is.na(cardiogenic_shock) &
+      !is.na(ecg)        & !is.na(cardiac_arrest) & 
+      !is.na(creatinine) & !is.na(sbp)            & !is.na(heart_rate) &  
+      !is.na(procode3),
+    cc2 = !is.na(imd_2019) & !is.na(ethnic_5) & !is.na(procode3)
+  )
+
+# Full cohort, complete cases 
+nstemi_cc <- nstemi %>% filter(cc)
+nstemi_cc_n <- nstemi_cc %>% nrow()
+
+# Full cohort, complete cases (sensitivity analysis)
+nstemi_cc2   <- nstemi %>% filter(cc2)
+nstemi_cc2_n <- nstemi_cc2 %>% nrow()
+
+# Angiogram eligibility: angiogram eligibility not missing --------------------
+nstemi_angel <- filter(nstemi, !is.na(angiogram_eligibility))
+nstemi_angel_n <- nstemi_angel %>% nrow()
+
+# Angiogram eligibility, complete cases
+nstemi_angel_cc <- nstemi_angel %>% filter(cc)
+nstemi_angel_cc_n <- nstemi_angel_cc %>% nrow()
+
+# Angiogram eligibility, complete cases (sensitivity analysis)
+nstemi_angel_cc2 <- nstemi_angel %>% filter(cc2)
+nstemi_angel_cc2_n <- nstemi_angel_cc2 %>% nrow()
+
+# Angiogram receipt: people eligible for an angiogram -------------------------
+nstemi_angrec <- filter(nstemi, angiogram_eligibility %in% "Yes")
+nstemi_angrec_n <- nstemi_angrec %>% nrow()
+
+nstemi_angrec_cc <- nstemi_angrec %>% filter(cc)
+nstemi_angrec_cc_n <- nstemi_angrec_cc %>% nrow()
+
+nstemi_angrec_cc2 <- nstemi_angrec %>% filter(cc2)
+nstemi_angrec_cc2_n <- nstemi_angrec_cc2 %>% nrow()
+
+# Angiogram within 72 hours ---------------------------------------------------
+# - People who received an angiogram, angiogram within 72 hours not missing 
+nstemi_ang72 <- 
+  filter(
+    nstemi, 
+    angiogram_receipt %in% "Yes",
+    angio_within_72h %in% c("Yes", "No")
+  )
+nstemi_ang72_n <- nstemi_ang72 %>% nrow()
+
+nstemi_ang72_cc <- nstemi_ang72 %>% filter(cc)
+nstemi_ang72_cc_n <- nstemi_ang72_cc %>% nrow()
+
+nstemi_ang72_cc2 <- nstemi_ang72 %>% filter(cc2)
+nstemi_ang72_cc2_n <- nstemi_ang72_cc2 %>% nrow()
+
+# Admission to cardiac ward ---------------------------------------------------
+# - Admission to cardiac ward variable not recorded as died in A&E;
+# - Admission to cardiac ward not missing
+
+nstemi_ward <- nstemi %>% filter(admission_to_cardiac_ward %in% c("Yes", "No"))
+nstemi_ward_n <- nstemi_ward %>% nrow()
+
+nstemi_ward_cc <- nstemi_ward %>% filter(cc)
+nstemi_ward_cc_n <- nstemi_ward_cc %>% nrow()
+
+nstemi_ward_cc2 <- nstemi_ward %>% filter(cc2)
+nstemi_ward_cc2_n <- nstemi_ward_cc2 %>% nrow()
+
+# Cardiac rehabilitation ------------------------------------------------------
+# - Discharged home, cardiac rehab yes /no / patient declined
+nstemi_rehab <- 
+  nstemi %>% 
+  filter(
+    discharge_destination %in% "Home",
+    cardiac_rehab %in% c("Yes", "No", "Patient declined")
+  )
+nstemi_rehab_n <- nstemi_rehab %>% nrow()
+
+nstemi_rehab_cc <- filter(nstemi_rehab, cc)
+nstemi_rehab_cc_n <- nstemi_rehab_cc %>% nrow()
+
+nstemi_rehab_cc2 <- filter(nstemi_rehab, cc2)
+nstemi_rehab_cc2_n <- nstemi_rehab_cc2 %>% nrow()
+
+# Secondary prevention --------------------------------------------------------
+# - Discharged home, secondary prevention not missing
+nstemi_prev <- 
+  nstemi %>%
+  filter(
+    discharge_destination %in% "Home",
+    !is.na(prev_all)
+  )
+nstemi_prev_n <- nstemi_prev %>% nrow()
+
+nstemi_prev_cc <- nstemi_prev %>% filter(cc)
+nstemi_prev_cc_n <- nstemi_prev_cc %>% nrow()
+
+nstemi_prev_cc2 <- nstemi_prev %>% filter(cc2)
+nstemi_prev_cc2_n <- nstemi_prev_cc2 %>% nrow()
+
+# Create table
+key_cohorts <- 
+  data.frame(
+    cohort = 
+      c("Full cohort", "Angiogram eligibility", "Receipt of angiogram",
+        "Angiogram within 72 hrs", "Admission to cardiac ward", 
+        "Cardiac rehabilitation", "Secondary prevention medication"
+      ),
+    n = 
+      c(nstemi_n,      nstemi_angel_n, nstemi_angrec_n, nstemi_ang72_n, 
+        nstemi_ward_n, nstemi_rehab_n, nstemi_prev_n
+      ),
+    n_cc = 
+      c(nstemi_cc_n,      nstemi_angel_cc_n, nstemi_angrec_cc_n, nstemi_ang72_cc_n, 
+        nstemi_ward_cc_n, nstemi_rehab_cc_n, nstemi_prev_cc_n
+      ),
+    n_cc2 = 
+       c(nstemi_cc2_n,     nstemi_angel_cc2_n, nstemi_angrec_cc2_n, nstemi_ang72_cc2_n, 
+        nstemi_ward_cc2_n, nstemi_rehab_cc2_n, nstemi_prev_cc2_n
+       )
+  )
+
+key_cohorts <- 
+  key_cohorts %>%
+  mutate(
+    n_rnd = rnd5(n),
+    #
+    n_cc_rnd = rnd5(n_cc),
+    per_cc = round(100*n_cc_rnd/n_rnd, digits = 1),
+    n_cc_rnd_fmt = paste0(format(n_cc_rnd, digits=6), " (", per_cc, "%)"),
+    #
+    n_cc2_rnd = rnd5(n_cc2),
+    per_cc2 = round(100*n_cc2_rnd/n_rnd, digits = 1),
+    n_cc2_rnd_fmt = paste0(format(n_cc2_rnd, digits=6), " (", per_cc2, "%)")
+  )
+
+kable(
+  select(key_cohorts, cohort, n_rnd, n_cc_rnd_fmt, n_cc2_rnd_fmt), 
+  caption = "NSTEMI: Key cohorts",
+  col.names = c("Cohort", "N", "Complete cases", "Complete cases (SA)")
+)
+
+```
+
+For the main analyses, the complete cases are based on IMD decile, ethnicity,
+cardiogenic shock, ECG determining treatment, cardiac arrest, creatinine, SBP,
+heart rate and hospital.
+
+In a sensitivity analysis (SA) excluding the MI characteristics, the complete
+cases analyses are based on IMD decile, ethnicity and hospital only.
+
+```{r nstemi_smi, results = "asis"}
+
+# Function to create summary of cohort by smi
+
+smi_fun <- function(df) {
+  
+  df_n <- nrow(df)
+  
+  out <- 
+    df %>% 
+    tabyl(smi) %>% 
+    adorn_pct_formatting() %>%
+    mutate(
+      n_rnd = rnd5(n),
+      per_rnd = round(100*n_rnd/df_n, digits=1),
+      n_rnd_fmt = paste0(n_rnd, " (", per_rnd, "%)")
+    )
+  
+  out <- pull(out, n_rnd_fmt)
+  
+  out
+  
+}
+
+nstemi_smi            <- smi_fun(nstemi)
+nstemi_cc_smi         <- smi_fun(nstemi_cc)
+nstemi_cc2_smi        <- smi_fun(nstemi_cc2)
+
+nstemi_angel_smi      <- smi_fun(nstemi_angel)
+nstemi_angel_cc_smi   <- smi_fun(nstemi_angel_cc)
+nstemi_angel_cc2_smi  <- smi_fun(nstemi_angel_cc2)
+
+nstemi_angrec_smi     <- smi_fun(nstemi_angrec)
+nstemi_angrec_cc_smi  <- smi_fun(nstemi_angrec_cc)
+nstemi_angrec_cc2_smi <- smi_fun(nstemi_angrec_cc2)
+
+nstemi_ang72_smi      <- smi_fun(nstemi_ang72)
+nstemi_ang72_cc_smi   <- smi_fun(nstemi_ang72_cc)
+nstemi_ang72_cc2_smi  <- smi_fun(nstemi_ang72_cc2)
+
+nstemi_ward_smi       <- smi_fun(nstemi_ward)
+nstemi_ward_cc_smi    <- smi_fun(nstemi_ward_cc)
+nstemi_ward_cc2_smi   <- smi_fun(nstemi_ward_cc2)
+
+nstemi_rehab_smi      <- smi_fun(nstemi_rehab)
+nstemi_rehab_cc_smi   <- smi_fun(nstemi_rehab_cc)  
+nstemi_rehab_cc2_smi  <- smi_fun(nstemi_rehab_cc2) 
+
+nstemi_prev_smi      <- smi_fun(nstemi_prev)
+nstemi_prev_cc_smi   <- smi_fun(nstemi_prev_cc)  
+nstemi_prev_cc2_smi  <- smi_fun(nstemi_prev_cc2)  
+
+# NSTEMI cohorts by SMI
+nstemi_cohorts_smi <- 
+  rbind(
+    nstemi_smi,
+    nstemi_cc_smi,
+    nstemi_cc2_smi,
+    #
+    nstemi_angel_smi, 
+    nstemi_angel_cc_smi,
+    nstemi_angel_cc2_smi,
+    #
+    nstemi_angrec_smi, 
+    nstemi_angrec_cc_smi,
+    nstemi_angrec_cc2_smi,
+    #
+    nstemi_ang72_smi,
+    nstemi_ang72_cc_smi,
+    nstemi_ang72_cc2_smi,
+    #
+    nstemi_ward_smi,
+    nstemi_ward_cc_smi,
+    nstemi_ward_cc2_smi,
+    #
+    nstemi_rehab_smi, 
+    nstemi_rehab_cc_smi,
+    nstemi_rehab_cc2_smi, 
+    #
+    nstemi_prev_smi, 
+    nstemi_prev_cc_smi,
+    nstemi_prev_cc2_smi
+  )
+
+colnames(nstemi_cohorts_smi) <- 
+  c("Schizophrenia", "Bipolar disorder", "Depression", "No SMI")
+
+nstemi_cohorts_smi <- 
+  as.data.frame(nstemi_cohorts_smi) %>%
+  mutate(
+    Cohort = rep(c("Full cohort", "Angiogram eligibility", "Receipt of angiogram",
+        "Angiogram within 72 hrs", "Admission to cardiac ward", 
+        "Cardiac rehabilitation", "Secondary prevention medication"),
+                 each = 3),
+    Including = rep(c("All", "CC", "CC (SA)"), times = 8)
+  ) %>%
+  select(Cohort, Including, Schizophrenia, `Bipolar disorder`, Depression, `No SMI`)
+
+kable(
+  nstemi_cohorts_smi,
+  caption = "NSTEMI cohorts by SMI",
+  row.names = FALSE
+)
+
+```
+CC: complete cases, CC: complete cases (sensitivity analysis)
+
+# Full cohort (including missing data)
+
+```{r nstemi_base, results = "asis"}
+
+tab1_cntrls <-
+  tableby.control(
+    numeric.stats = c("meansd" ,"medianrange_kf" , "n_per_miss_5"),
+    cat.stats = c("countpct_5"), # Nmiss - suppress for now - small no.s for ethnicity
+    cat.simplify = FALSE
+  )
+
+# Baseline characteristics table based on full NSTEMI cohort
+tab1_nstemi <-
+  tableby(
+    smi ~
+      age_mi + sex +
+      includeNA(imd_2019, label = "Missing") +
+      includeNA(ethnic_5, label = "Missing") +
+      mi_event_year + mi_wd + mi_on + procode3_miss +
+      comorb_angina + comorb_mi +
+      hx_pci +
+      comorb_hf +  comorb_diab +
+      comorb_crf + comorb_cevd +
+      includeNA(cardiogenic_shock, label = "Missing") +
+      includeNA(ecg, label = "Missing") +
+      includeNA(st_deviation, label = "Missing") +
+      includeNA(cardiac_arrest, label = "Missing") +
+      includeNA(cardiac_enzymes_elevated, label = "Missing") +
+      creatinine + crt_log + sbp + heart_rate +
+      covid +
+      includeNA(bmi_cat) + includeNA(smoking_cat) +
+      includeNA(discharge_destination) + 
+      includeNA(angiogram_eligibility) + 
+      includeNA(angiogram_receipt) + 
+      includeNA(angio_within_72h) + 
+      includeNA(admission_to_cardiac_ward) + 
+      includeNA(cardiac_rehab) + 
+      includeNA(prev_all) + 
+      includeNA(aspirin) + 
+      includeNA(bb) + 
+      includeNA(statin) + 
+      includeNA(ace) + 
+      includeNA(thieno) + 
+      includeNA(tica),
+    data = nstemi,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(meansd = 'Mean (SD)',
+           medianrange_kf = 'Median [IQR]',
+           n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+
+tab1_nstemi$tables$smi$y$stats <- 5*round(tab1_nstemi$tables$smi$y$stats/5)
+
+summary(
+  tab1_nstemi,
+  title = "Baseline characteristics for the NSTEMI cohort, counts rounded to the nearest 5")
+
+write.csv(
+  summary(tab1_nstemi, text = NULL),
+  file = file.path(bc_folder, "02_nstemi_full_baseline.csv")
+)
+
+```
