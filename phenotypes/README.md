@@ -53,8 +53,10 @@ All of our codelists are also available via the HDR UK Phenotype Library:
 * Schizophrenia: https://phenotypes.healthdatagateway.org/phenotypes/PH1718
 * Bipolar disorder: https://phenotypes.healthdatagateway.org/phenotypes/PH1719
 * Depression: https://phenotypes.healthdatagateway.org/phenotypes/PH1720
+* Cerebrovascular disease: https://phenotypes.healthdatagateway.org/phenotypes/PH1791/
+* Chronic renal failure: https://phenotypes.healthdatagateway.org/phenotypes/PH1792/
 * Myocardial infarction: https://phenotypes.healthdatagateway.org/phenotypes/PH1722
-* !!!OTHER CODELISTS TO BE ADDED HERE!!!
+* PCI: https://phenotypes.healthdatagateway.org/phenotypes/PH1793/version/3735/detail/
 
 
 # References
