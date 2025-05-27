@@ -12,7 +12,6 @@ title: "Baseline characteristics table for NSTEMI"
 
 knitr::opts_chunk$set(echo = FALSE)
 
-## required packages
 library(tidyverse)
 library(DBI)
 library(dbplyr)
@@ -21,29 +20,25 @@ library(janitor)
 library(knitr)
 library(arsenal)
 library(lubridate)
+library(ggh4x) # hacks for ggplot
 
 ccu046_folder <- "~/collab/CCU046"
-
 ccu046_01_folder <- file.path(ccu046_folder, "CCU046_01")
 bc_folder <- file.path(ccu046_01_folder, "baseline_characteristics")
-
 cohort_folder <- file.path(ccu046_folder, "CCU046_02", "processed_data")
-
 r_folder <- file.path(ccu046_folder, "r")
-# Additional tableby functions to help with rounding to 5
-source(file.path(r_folder, "tableby_functions.R"))  
-# Additional functions to help with rounding to 5
-source(file.path(r_folder, "output_functions.R")) 
 
+# Additional functions to help with rounding to 5
+source(file.path(r_folder, "tableby_functions_19Jan24.R"))  
+source(file.path(r_folder, "output_functions_11Jul24.R")) 
 ```
 
 ```{r load_data, include=FALSE}
 
 cohort <- readRDS(file = file.path(cohort_folder, "01_cohort.rds"))
 
-st_deviation_no <- 
-  c("No acute changes", "Left bundle branch block", "T wave changes only",
-    "Other acute abnormality")
+st_deviation_no <- c("No acute changes", "Left bundle branch block",
+                     "T wave changes only", "Other acute abnormality")
 cohort <- 
   cohort %>%
   mutate(
@@ -53,22 +48,30 @@ cohort <-
         ecg %in% c("ST segment elevation", "ST segment depression") ~ "Yes",
         is.na(ecg) ~ as.character(NA)
       ), 
-    crt_log = log(creatinine)
+    crt_log = log(creatinine),
+    mi_event_month = floor_date(mi_event_date, "month")
   )
 
-
-labels(cohort) <-
-  c(
-    crt_log = "log [Creatinine (micromol/L)]",
-    st_deviation = "ST deviation"
+# Smoking cessation
+cohort <- 
+  cohort %>%
+  mutate(
+    smoking_cessation_advice = 
+      case_when(
+        smoking_cessation_advice %in% "0. No" ~ "No",
+        smoking_cessation_advice %in% "1. Yes" ~ "Yes",
+        smoking_cessation_advice %in% "2. Planned in rehab" ~ "Planned in rehab",
+        smoking_cessation_advice %in% "3. Not applicable" ~ "Not applicable",
+        smoking_cessation_advice %in% "9. Unknown" ~ as.character(NA),
+        TRUE ~ as.character(NA)
+      ),
+    smoking_cessation_advice = 
+      factor(smoking_cessation_advice, levels = c("Yes", "Planned in rehab", "No", "Not applicable"))
   )
 
 # Individual secondary prevention medications
-
-med_lvls <-
-  c("Yes", "Contraindicated", "Patient declined treatment", "Not applicable", 
-    "Not indicated", "No")
-
+med_lvls <- c("Yes", "Contraindicated", "Patient declined treatment", 
+              "Not applicable", "Not indicated", "No")
 cohort <- 
   cohort %>% 
   mutate(
@@ -99,6 +102,9 @@ cohort <-
 
 labels(cohort) <- 
   c(
+    crt_log = "log [Creatinine (micromol/L)]",
+    st_deviation = "ST deviation",
+    smoking_cessation_advice = "Received smoking cessation advice",
     aspirin = "Discharged on aspirin",
     bb      = "Discharged on beta blocker",
     statin  = "Discharged on statin",
@@ -108,6 +114,18 @@ labels(cohort) <-
     angiogram_eligibility = "Angiogram eligibility",
     angiogram_receipt     = "Angiogram receipt",
     angio_within_72h      = "Angiogram within 72 hrs"
+  )
+
+# Create binary SMI variable
+cohort <-
+  cohort %>%
+  mutate(
+    smi_bin =
+      case_when(
+        smi %in% c("Schizophrenia", "Bipolar disorder", "Depression") ~ "Mental illness",
+        smi %in% "No SMI" ~ "No mental illness"
+      ),
+    smi_bin = factor(smi_bin, levels = c("No mental illness", "Mental illness"))
   )
 
 ```
@@ -127,10 +145,9 @@ nstemi_n <- nstemi %>% nrow()
 nstemi <- 
   nstemi %>%
   mutate(
-    cc = !is.na(imd_2019)   & !is.na(ethnic_5)       & !is.na(cardiogenic_shock) &
-      !is.na(ecg)        & !is.na(cardiac_arrest) & 
-      !is.na(creatinine) & !is.na(sbp)            & !is.na(heart_rate) &  
-      !is.na(procode3),
+    cc = !is.na(imd_2019) & !is.na(ethnic_5) & !is.na(cardiogenic_shock) &
+         !is.na(ecg) & !is.na(cardiac_arrest) &  !is.na(creatinine) &
+         !is.na(sbp) & !is.na(heart_rate) &  !is.na(procode3),
     cc2 = !is.na(imd_2019) & !is.na(ethnic_5) & !is.na(procode3)
   )
 
@@ -166,12 +183,9 @@ nstemi_angrec_cc2_n <- nstemi_angrec_cc2 %>% nrow()
 
 # Angiogram within 72 hours ---------------------------------------------------
 # - People who received an angiogram, angiogram within 72 hours not missing 
-nstemi_ang72 <- 
-  filter(
-    nstemi, 
-    angiogram_receipt %in% "Yes",
-    angio_within_72h %in% c("Yes", "No")
-  )
+nstemi_ang72 <- filter(nstemi, 
+                       angiogram_receipt %in% "Yes",
+                       angio_within_72h %in% c("Yes", "No"))
 nstemi_ang72_n <- nstemi_ang72 %>% nrow()
 
 nstemi_ang72_cc <- nstemi_ang72 %>% filter(cc)
@@ -195,12 +209,9 @@ nstemi_ward_cc2_n <- nstemi_ward_cc2 %>% nrow()
 
 # Cardiac rehabilitation ------------------------------------------------------
 # - Discharged home, cardiac rehab yes /no / patient declined
-nstemi_rehab <- 
-  nstemi %>% 
-  filter(
-    discharge_destination %in% "Home",
-    cardiac_rehab %in% c("Yes", "No", "Patient declined")
-  )
+nstemi_rehab <- nstemi %>% 
+                filter(discharge_destination %in% "Home",
+                       cardiac_rehab %in% c("Yes", "No", "Patient declined"))
 nstemi_rehab_n <- nstemi_rehab %>% nrow()
 
 nstemi_rehab_cc <- filter(nstemi_rehab, cc)
@@ -211,12 +222,9 @@ nstemi_rehab_cc2_n <- nstemi_rehab_cc2 %>% nrow()
 
 # Secondary prevention --------------------------------------------------------
 # - Discharged home, secondary prevention not missing
-nstemi_prev <- 
-  nstemi %>%
-  filter(
-    discharge_destination %in% "Home",
-    !is.na(prev_all)
-  )
+nstemi_prev <- nstemi %>%
+               filter(discharge_destination %in% "Home",
+                      !is.na(prev_all))
 nstemi_prev_n <- nstemi_prev %>% nrow()
 
 nstemi_prev_cc <- nstemi_prev %>% filter(cc)
@@ -225,26 +233,36 @@ nstemi_prev_cc_n <- nstemi_prev_cc %>% nrow()
 nstemi_prev_cc2 <- nstemi_prev %>% filter(cc2)
 nstemi_prev_cc2_n <- nstemi_prev_cc2 %>% nrow()
 
+# Smoking advice --------------------------------------------------------------
+# - Smokers, discharged home, smoking cessation advice recorded
+nstemi_smk <- 
+  nstemi %>%
+  filter(
+    discharge_destination %in% "Home",
+    smoking_cat %in% "Current smoker", 
+    smoking_cessation_advice %in% c("Yes", "Planned in rehab", "No")
+  )
+nstemi_smk_n <- nstemi_smk %>% nrow()
+
+nstemi_smk_cc <- nstemi_smk %>% filter(cc)
+nstemi_smk_cc_n <- nstemi_smk_cc %>% nrow()
+
+nstemi_smk_cc2 <- nstemi_smk %>% filter(cc2)
+nstemi_smk_cc2_n <- nstemi_smk_cc2 %>% nrow()
+
 # Create table
 key_cohorts <- 
   data.frame(
-    cohort = 
-      c("Full cohort", "Angiogram eligibility", "Receipt of angiogram",
-        "Angiogram within 72 hrs", "Admission to cardiac ward", 
-        "Cardiac rehabilitation", "Secondary prevention medication"
-      ),
-    n = 
-      c(nstemi_n,      nstemi_angel_n, nstemi_angrec_n, nstemi_ang72_n, 
-        nstemi_ward_n, nstemi_rehab_n, nstemi_prev_n
-      ),
-    n_cc = 
-      c(nstemi_cc_n,      nstemi_angel_cc_n, nstemi_angrec_cc_n, nstemi_ang72_cc_n, 
-        nstemi_ward_cc_n, nstemi_rehab_cc_n, nstemi_prev_cc_n
-      ),
-    n_cc2 = 
-       c(nstemi_cc2_n,     nstemi_angel_cc2_n, nstemi_angrec_cc2_n, nstemi_ang72_cc2_n, 
-        nstemi_ward_cc2_n, nstemi_rehab_cc2_n, nstemi_prev_cc2_n
-       )
+    cohort = c("Full cohort", "Angiogram eligibility", "Receipt of angiogram",
+               "Angiogram within 72 hrs", "Admission to cardiac ward", 
+               "Cardiac rehabilitation", "Secondary prevention medication",
+               "Smoking advice"),
+    n = c(nstemi_n, nstemi_angel_n, nstemi_angrec_n, nstemi_ang72_n, 
+          nstemi_ward_n, nstemi_rehab_n, nstemi_prev_n,   nstemi_smk_n),
+    n_cc = c(nstemi_cc_n, nstemi_angel_cc_n, nstemi_angrec_cc_n, nstemi_ang72_cc_n, 
+             nstemi_ward_cc_n, nstemi_rehab_cc_n, nstemi_prev_cc_n, nstemi_smk_cc_n),
+    n_cc2 = c(nstemi_cc2_n, nstemi_angel_cc2_n, nstemi_angrec_cc2_n, nstemi_ang72_cc2_n, 
+              nstemi_ward_cc2_n, nstemi_rehab_cc2_n, nstemi_prev_cc2_n, nstemi_smk_cc2_n)
   )
 
 key_cohorts <- 
@@ -266,20 +284,16 @@ kable(
   caption = "NSTEMI: Key cohorts",
   col.names = c("Cohort", "N", "Complete cases", "Complete cases (SA)")
 )
-
 ```
 
-For the main analyses, the complete cases are based on IMD decile, ethnicity,
-cardiogenic shock, ECG determining treatment, cardiac arrest, creatinine, SBP,
-heart rate and hospital.
+For the main analyses, the complete cases are based on IMD decile, ethnicity, cardiogenic shock, ECG determining treatment, cardiac arrest, creatinine, SBP, heart rate
+and hospital.
 
-In a sensitivity analysis (SA) excluding the MI characteristics, the complete
-cases analyses are based on IMD decile, ethnicity and hospital only.
+In a sensitivity analysis (SA) excluding the MI characteristics, the complete cases analyses are based on IMD decile, ethnicity and hospital only.
 
 ```{r nstemi_smi, results = "asis"}
 
 # Function to create summary of cohort by smi
-
 smi_fun <- function(df) {
   
   df_n <- nrow(df)
@@ -295,7 +309,6 @@ smi_fun <- function(df) {
     )
   
   out <- pull(out, n_rnd_fmt)
-  
   out
   
 }
@@ -328,6 +341,10 @@ nstemi_prev_smi      <- smi_fun(nstemi_prev)
 nstemi_prev_cc_smi   <- smi_fun(nstemi_prev_cc)  
 nstemi_prev_cc2_smi  <- smi_fun(nstemi_prev_cc2)  
 
+nstemi_smk_smi      <- smi_fun(nstemi_smk)
+nstemi_smk_cc_smi   <- smi_fun(nstemi_smk_cc)  
+nstemi_smk_cc2_smi  <- smi_fun(nstemi_smk_cc2)  
+
 # NSTEMI cohorts by SMI
 nstemi_cohorts_smi <- 
   rbind(
@@ -357,7 +374,11 @@ nstemi_cohorts_smi <-
     #
     nstemi_prev_smi, 
     nstemi_prev_cc_smi,
-    nstemi_prev_cc2_smi
+    nstemi_prev_cc2_smi, 
+    #
+    nstemi_smk_smi, 
+    nstemi_smk_cc_smi,
+    nstemi_smk_cc2_smi
   )
 
 colnames(nstemi_cohorts_smi) <- 
@@ -368,7 +389,8 @@ nstemi_cohorts_smi <-
   mutate(
     Cohort = rep(c("Full cohort", "Angiogram eligibility", "Receipt of angiogram",
         "Angiogram within 72 hrs", "Admission to cardiac ward", 
-        "Cardiac rehabilitation", "Secondary prevention medication"),
+        "Cardiac rehabilitation", "Secondary prevention medication",
+        "Smoking advice"),
                  each = 3),
     Including = rep(c("All", "CC", "CC (SA)"), times = 8)
   ) %>%
@@ -379,7 +401,6 @@ kable(
   caption = "NSTEMI cohorts by SMI",
   row.names = FALSE
 )
-
 ```
 CC: complete cases, CC: complete cases (sensitivity analysis)
 
@@ -390,7 +411,7 @@ CC: complete cases, CC: complete cases (sensitivity analysis)
 tab1_cntrls <-
   tableby.control(
     numeric.stats = c("meansd" ,"medianrange_kf" , "n_per_miss_5"),
-    cat.stats = c("countpct_5"), # Nmiss - suppress for now - small no.s for ethnicity
+    cat.stats = c("countpct_5"),
     cat.simplify = FALSE
   )
 
@@ -426,7 +447,8 @@ tab1_nstemi <-
       includeNA(statin) + 
       includeNA(ace) + 
       includeNA(thieno) + 
-      includeNA(tica),
+      includeNA(tica) +
+      includeNA(smoking_cessation_advice),
     data = nstemi,
     control = tab1_cntrls,
     digits = 1,
@@ -437,7 +459,6 @@ tab1_nstemi <-
            n_per_miss_5 = 'Missing',
            Nmiss = 'Missing')
   )
-
 tab1_nstemi$tables$smi$y$stats <- 5*round(tab1_nstemi$tables$smi$y$stats/5)
 
 summary(
@@ -448,5 +469,762 @@ write.csv(
   summary(tab1_nstemi, text = NULL),
   file = file.path(bc_folder, "02_nstemi_full_baseline.csv")
 )
+```
+
+# Outcomes
+
+## Angiogram eligibility
+
+```{r out_angel, results = "asis"}
+
+tab_angel <-
+  tableby(
+    smi ~ includeNA(angiogram_eligibility),
+    data = nstemi,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_angel$tables$smi$y$stats <- 5*round(tab_angel$tables$smi$y$stats/5)
+
+summary(tab_angel,
+        title = "Angiogram eligibility, counts rounded to the nearest 5")
+
+# Repeat excluding missing
+tab_angel_cc <-
+  tableby(
+    smi ~ angiogram_eligibility,
+    data = filter(nstemi, !is.na(angiogram_eligibility)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_angel_cc$tables$smi$y$stats <- 5*round(tab_angel_cc$tables$smi$y$stats/5)
+
+summary(tab_angel_cc,
+        title = "Angiogram eligibility, counts rounded to the nearest 5")
+```
+
+## Angiogram receipt
+
+```{r out_angrec, results = "asis"}
+
+# Summary of angiogram receipt amongst eligible patients
+tab_angrec <-
+  tableby(
+    smi ~ includeNA(angiogram_receipt),
+    data = nstemi_angrec,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_angrec$tables$smi$y$stats <- 5*round(tab_angrec$tables$smi$y$stats/5)
+
+summary(tab_angrec,
+        title = "Angiogram receipt amongst patients eligible for an angiogram, counts rounded to the nearest 5")
+```
+
+## Coronary intervention
+
+```{r out_corint, results = "asis"}
+
+ci_lvls <- c("Percutaneous coronary intervention", "CABG",
+             "PCI planned after discharge", "CABG planned after discharge", 
+             "Not applicable", "Patient refused", "Not performed or arranged")
+
+nstemi <- 
+  nstemi %>%
+  mutate(
+    coronary_intervention = substring(coronary_intervention, 4, 1000),
+    coronary_intervention = ifelse(coronary_intervention %in% "Unknown", NA, coronary_intervention),
+    coronary_intervention = factor(coronary_intervention, levels = ci_lvls)
+  )
+
+
+# Summary of coronary intervention amongst people who received angiography
+tab_corint <-
+  tableby(
+    smi ~ includeNA(coronary_intervention),
+    data = filter(nstemi, angiogram_receipt %in% "Yes"),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+
+
+tab_corint$tables$smi$y$stats <- 5*round(tab_corint$tables$smi$y$stats/5)
+
+summary(
+  tab_corint,
+  title = "Coronary intervention amongst patients who received angiogram, counts rounded to the nearest 5")
+
+## Repeat excluding missing
+
+tab_corint_cc <-
+  tableby(
+    smi ~ coronary_intervention,
+    data = filter(nstemi, angiogram_receipt %in% "Yes" & !is.na(coronary_intervention)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+
+
+tab_corint_cc$tables$smi$y$stats <- 5*round(tab_corint_cc$tables$smi$y$stats/5)
+
+summary(
+  tab_corint_cc,
+  title = "Coronary intervention amongst patients who received angiogram, counts rounded to the nearest 5")
+
+
+```
+
+## Angiogram within 72 hours
+
+```{r out_ang72, results = "asis"}
+
+nstemi_ang72_out <- 
+  filter(nstemi, angiogram_receipt %in% "Yes") %>%
+  mutate(
+    angio_within_72h = ifelse(angio_within_72h %in% "Unknown", NA, angio_within_72h)
+  )
+
+# Summary of angiogram within 72 hrs amongst people who received angiography
+tab_ang72 <-
+  tableby(
+    smi ~ includeNA(angio_within_72h),
+    data = nstemi_ang72_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_ang72$tables$smi$y$stats <- 5*round(tab_ang72$tables$smi$y$stats/5)
+
+summary(tab_ang72,
+        title = "Angiogram within 72 hours amongst patients who received angiogram, counts rounded to the nearest 5")
+
+# Repeat excluding misisng
+tab_ang72_cc <-
+  tableby(
+    smi ~ angio_within_72h,
+    data = filter(nstemi_ang72_out, !is.na(angio_within_72h)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_ang72_cc$tables$smi$y$stats <- 5*round(tab_ang72_cc$tables$smi$y$stats/5)
+
+summary(tab_ang72_cc,
+        title = "Angiogram within 72 hours amongst patients who received angiogram, counts rounded to the nearest 5")
+```
+
+## Admission to cardiac ward
+
+```{r out_ward, results = "asis"}
+
+nstemi_ward_out <- filter(nstemi, !admission_to_cardiac_ward %in% "Died_in_A&E")
+
+# Summary of admission to cardiac ward among patients who did not die in A&E
+tab_ward <-
+  tableby(
+    smi ~ includeNA(admission_to_cardiac_ward),
+    data = nstemi_ward_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_ward$tables$smi$y$stats <- 5*round(tab_ward$tables$smi$y$stats/5)
+
+summary(
+  tab_ward,
+  title = "Admission to cardiac ward amongst patients who did not die in A&E, counts rounded to the nearest 5")
+
+# Repeat excluding missing
+tab_ward_cc <-
+  tableby(
+    smi ~ admission_to_cardiac_ward,
+    data = filter(nstemi_ward_out, !is.na(admission_to_cardiac_ward)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_ward_cc$tables$smi$y$stats <- 5*round(tab_ward_cc$tables$smi$y$stats/5)
+
+summary(
+  tab_ward_cc,
+  title = "Admission to cardiac ward amongst patients who did not die in A&E, counts rounded to the nearest 5")
+```
+
+## Referred for cardiac rehabilitation
+
+```{r out_rehab, results = "asis"}
+
+# Two ways to look at cardiac rehab:
+# - Including people who were not indicated (e.g. due to severe comorb)
+# - Exclude the above group, as per the analyses
+# For info, present both ways
+
+# Option 1 -----------------------
+nstemi_rehab_out <- filter(nstemi, discharge_destination %in% "Home")
+
+tab_rehab <-
+  tableby(
+    smi ~ includeNA(cardiac_rehab),
+    data = nstemi_rehab_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rehab$tables$smi$y$stats <- 5*round(tab_rehab$tables$smi$y$stats/5)
+
+summary(tab_rehab,
+        title = "Referral for cardiac rehab amongst patients discharged home, counts rounded to the nearest 5")
+
+# Option 2 ---------------
+nstemi_rehab_out2 <- 
+  filter(nstemi, 
+         discharge_destination %in% "Home",
+         !cardiac_rehab %in% "Not indicated")
+
+tab_rehab2 <-
+  tableby(
+    smi ~ includeNA(cardiac_rehab),
+    data = nstemi_rehab_out2,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rehab2$tables$smi$y$stats <- 5*round(tab_rehab2$tables$smi$y$stats/5)
+
+summary(
+  tab_rehab2,
+  title = "Referral for cardiac rehab amongst patients discharged home and without cardiac rehabilitation recorded as 'Not indicated', counts rounded to the nearest 5")
+
+# Repeat option 2 excluding missing
+tab_rehab2_cc <-
+  tableby(
+    smi ~ cardiac_rehab,
+    data = filter(nstemi_rehab_out2, !is.na(cardiac_rehab)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rehab2_cc$tables$smi$y$stats <- 5*round(tab_rehab2_cc$tables$smi$y$stats/5)
+
+summary(tab_rehab2_cc,
+        title = "Referral for cardiac rehab amongst patients discharged home and without cardiac rehabilitation recorded as 'Not indicated', counts rounded to the nearest 5")
+```
+
+## Discharged on all secondary prevention medications
+
+```{r out_prev, results = "asis"}
+
+nstemi_prev_out <- filter(nstemi, discharge_destination %in% "Home") 
+
+# Summary of secondary prevention medication amongst people discharged home
+tab_prev <-
+  tableby(
+    smi ~ includeNA(prev_all),
+    data = nstemi_prev_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_prev$tables$smi$y$stats <- 5*round(tab_prev$tables$smi$y$stats/5)
+
+summary(tab_prev,
+        title = "Receipt of all secondary prevention medication amongst patients discharged home, counts rounded to the nearest 5")
+
+# Repeat excluding missing
+tab_prev <-
+  tableby(
+    smi ~ prev_all,
+    data = filter(nstemi_prev_out, !is.na(prev_all)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_prev$tables$smi$y$stats <- 5*round(tab_prev$tables$smi$y$stats/5)
+
+summary(
+  tab_prev,
+  title = "Receipt of all secondary prevention medication amongst patients discharged home, counts rounded to the nearest 5")
+```
+
+## Summary of outcomes by month
+
+```{r out_month, results = "asis"}
+
+# Count of NSTEMI by month
+nstemi_month_adm <- 
+  nstemi %>%
+  tabyl(mi_event_month) %>%
+  mutate(
+    outcome = "MI admissions (N)",
+    n_per = rnd5(n)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Angiogram eligibility
+nstemi_month_angel <-
+  filter(nstemi, !is.na(angiogram_eligibility)) %>%
+  tabyl(mi_event_month, angiogram_eligibility) %>%
+  mutate(
+    outcome = "Angiography eligibility (%)",
+    total = No + Yes,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Angiogram receipt
+nstemi_month_angrec <-
+  nstemi_angrec %>%
+  tabyl(mi_event_month, angiogram_receipt) %>%
+  mutate(
+    outcome = "Angiography receipt (%)",
+    total = No + Yes + `Patient refused`,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Angiogram within 72 hours
+nstemi_month_ang72 <- 
+  filter(nstemi_ang72_out, !is.na(angio_within_72h)) %>%
+  tabyl(mi_event_month, angio_within_72h) %>%
+  mutate(
+    outcome = "Angiography within 72 hrs (%)",
+    total = Yes + No, 
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Admission to cardiac ward
+nstemi_month_ward <- 
+  filter(nstemi_ward_out, !is.na(admission_to_cardiac_ward)) %>%
+  tabyl(mi_event_month, admission_to_cardiac_ward) %>%
+  mutate(
+    outcome = "Admission to cardiac ward (%)",
+    total = Yes + No, 
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Referral for cardiac rehabilitation
+nstemi_month_rehab <- 
+  filter(nstemi_rehab_out2, !is.na(cardiac_rehab)) %>%
+  tabyl(mi_event_month, cardiac_rehab) %>%
+  mutate(
+    outcome = "Referral for rehabilitation (%)",
+    total = Yes + No + `Patient declined`,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+  
+# Secondary prevention medication
+nstemi_month_prev <- 
+  filter(nstemi_prev_out, !is.na(prev_all)) %>%
+  tabyl(mi_event_month, prev_all) %>%
+  mutate(
+    outcome = "Secondary prevention (%)", 
+    total = Yes + No,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+  
+# Collate outcomes by month
+nstemi_month <- 
+  bind_rows(
+    nstemi_month_adm,
+    nstemi_month_angel,
+    nstemi_month_angrec, 
+    nstemi_month_ang72,
+    nstemi_month_ward,
+    nstemi_month_rehab, 
+    nstemi_month_prev
+  ) %>%
+  mutate(
+    outcome = 
+      factor(
+        outcome, 
+        levels = c("MI admissions (N)", "Angiography eligibility (%)", "Angiography receipt (%)",
+                   "Angiography within 72 hrs (%)", "Admission to cardiac ward (%)", 
+                   "Referral for rehabilitation (%)", "Secondary prevention (%)")
+      )
+  )
+
+# Save outcomes by month
+write.csv(
+  nstemi_month, 
+  file.path(bc_folder, "02_nstemi_month.csv"),
+  row.names = FALSE
+)
+
+nstemi_month_plot <- 
+ggplot(nstemi_month, aes(x = mi_event_month, y = n_per)) + 
+  geom_line() + 
+  facet_wrap(
+    vars(outcome),
+    ncol = 1,
+    scales = "free_y",
+    strip.position = "top"
+  ) +
+  facetted_pos_scales(
+    y = 
+      list(
+        NULL,
+        scale_y_continuous(limits = c(80, 91.6)), 
+        scale_y_continuous(limits = c(80, 91.6)), 
+        NULL,
+        NULL,
+        scale_y_continuous(limits = c(80, 91.6)), 
+        scale_y_continuous(limits = c(80, 91.6))
+      )
+  ) +
+  scale_x_date(date_labels = "%h %Y", expand = c(0,0)) + 
+  theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = "white"),
+    panel.spacing = unit(0 , 'lines')
+  ) + 
+  labs(x = "Month", y = "")
+
+nstemi_month_plot
+```
+
+## Summary of outcomes by 4-month period
+
+```{r out_period, results = "asis"}
+
+# Count of NSTEMI by period and SMI
+nstemi_per_adm <- 
+  nstemi %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(
+    outcome = "MI admissions (N)",
+    n_per = rnd5(n)
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Angiogram eligibility
+nstemi_per_angel <-
+  filter(nstemi, !is.na(angiogram_eligibility)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Angiography eligibility (%)",
+    total = n(),
+    Yes = sum(angiogram_eligibility %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+  
+# Angiogram receipt
+nstemi_per_angrec <-
+  nstemi_angrec %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Angiography receipt (%)",
+    total = n(), 
+    Yes = sum(angiogram_receipt %in% "Yes"),
+    n_per = 100*Yes/total
+  )%>%
+  select(outcome, period_4, smi, n_per)
+
+# Angiogram within 72 hours
+nstemi_per_ang72 <- 
+  filter(nstemi_ang72_out, !is.na(angio_within_72h)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Angiography within 72 hrs (%)",
+    total = n(),
+    Yes = sum(angio_within_72h %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Admission to cardiac ward
+nstemi_per_ward <- 
+  filter(nstemi_ward_out, !is.na(admission_to_cardiac_ward)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Admission to cardiac ward (%)",
+    total = n(),
+    Yes = sum(admission_to_cardiac_ward %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+  
+# Referral for cardiac rehabilitation
+nstemi_per_rehab <- 
+  filter(nstemi_rehab_out2, !is.na(cardiac_rehab)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Referral for rehabilitation (%)",
+    total = n(), 
+    Yes = sum(cardiac_rehab %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+  
+# Secondary prevention medication
+nstemi_per_prev <- 
+  filter(nstemi_prev_out, !is.na(prev_all)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Secondary prevention (%)",
+    total = n(), 
+    Yes = sum(prev_all %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+  
+# Collate outcomes by month
+nstemi_per <- 
+  bind_rows(
+    nstemi_per_adm,
+    nstemi_per_angel,
+    nstemi_per_angrec, 
+    nstemi_per_ang72,
+    nstemi_per_ward,
+    nstemi_per_rehab, 
+    nstemi_per_prev
+  ) %>%
+  mutate(
+    outcome = factor(outcome, 
+                     levels = c("MI admissions (N)", "Angiography eligibility (%)",
+                                "Angiography receipt (%)", "Angiography within 72 hrs (%)",
+                                "Admission to cardiac ward (%)", "Referral for rehabilitation (%)",
+                                "Secondary prevention (%)")),
+    period_4_start = paste("1", substring(period_4, 1, 8)),
+    period_4_date = as.Date(period_4_start, format = "%d %b %Y"),
+  )
+
+# Save outcomes by month
+write.csv(
+  nstemi_per, 
+  file.path(bc_folder, "02_nstemi_period_smi.csv"),
+  row.names = FALSE
+)
+
+nstemi_per_plot <- 
+  ggplot(nstemi_per, aes(x = period_4_date, y = n_per, color = smi)) + 
+  geom_line() + 
+  facet_wrap(
+    vars(outcome),
+    ncol = 1,
+    scales = "free_y",
+    strip.position = "top"
+  ) +
+  scale_x_date(date_labels = "%h %Y", expand = c(0,0)) + 
+  theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = "white"),
+    panel.spacing = unit(0 , 'lines')
+  ) + 
+  labs(x = "Month", y = "")
+
+nstemi_per_plot
+```
+
+## Summary of outcomes by 4-month period (binary SMI)
+
+```{r out_period_bin, results = "asis"}
+
+# Count of NSTEMI by period and SMI
+nstemi_per_bin_adm <- 
+  nstemi %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(
+    outcome = "MI admissions (N)",
+    n_per = rnd5(n)
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per)
+
+# Angiogram eligibility
+nstemi_per_bin_angel <-
+  filter(nstemi, !is.na(angiogram_eligibility)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Angiography eligibility (%)",
+    total = n(),
+    Yes = sum(angiogram_eligibility %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Angiogram receipt
+nstemi_per_bin_angrec <-
+  nstemi_angrec %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Angiography receipt (%)",
+    total = n(), 
+    Yes = sum(angiogram_receipt %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  )%>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Angiogram within 72 hours
+nstemi_per_bin_ang72 <- 
+  filter(nstemi_ang72_out, !is.na(angio_within_72h)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Angiography within 72 hrs (%)",
+    total = n(),
+    Yes = sum(angio_within_72h %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Admission to cardiac ward
+nstemi_per_bin_ward <- 
+  filter(nstemi_ward_out, !is.na(admission_to_cardiac_ward)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Admission to cardiac ward (%)",
+    total = n(),
+    Yes = sum(admission_to_cardiac_ward %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Referral for cardiac rehabilitation
+nstemi_per_bin_rehab <- 
+  filter(nstemi_rehab_out2, !is.na(cardiac_rehab)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Referral for rehabilitation (%)",
+    total = n(), 
+    Yes = sum(cardiac_rehab %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+
+# Secondary prevention medication
+nstemi_per_bin_prev <- 
+  filter(nstemi_prev_out, !is.na(prev_all)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Secondary prevention (%)",
+    total = n(), 
+    Yes = sum(prev_all %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Collate outcomes by month
+nstemi_per_bin <- 
+  bind_rows(
+    nstemi_per_bin_adm,
+    nstemi_per_bin_angel,
+    nstemi_per_bin_angrec, 
+    nstemi_per_bin_ang72,
+    nstemi_per_bin_ward,
+    nstemi_per_bin_rehab, 
+    nstemi_per_bin_prev
+  ) %>%
+  mutate(
+    outcome = 
+      factor(
+        outcome, 
+        levels = c("MI admissions (N)", "Angiography eligibility (%)", "Angiography receipt (%)",
+                   "Angiography within 72 hrs (%)", "Admission to cardiac ward (%)", 
+                   "Referral for rehabilitation (%)", "Secondary prevention (%)")
+      ),
+    period_4_start = paste("1", substring(period_4, 1, 8)),
+    period_4_date = as.Date(period_4_start, format = "%d %b %Y"),
+  )
+
+# Save outcomes by month
+write.csv(
+  nstemi_per_bin, 
+  file.path(bc_folder, "02_nstemi_period_smi_bin.csv"),
+  row.names = FALSE
+)
+
+nstemi_per_bin_plot <- 
+  ggplot(nstemi_per_bin, aes(x = period_4_date, y = n_per, color = smi_bin)) + 
+  geom_line() + 
+  facet_wrap(
+    vars(outcome),
+    ncol = 1,
+    scales = "free_y",
+    strip.position = "top"
+  ) +
+  scale_x_date(
+    date_labels = "%h %Y",
+    expand = c(0,0)
+  ) + 
+  theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = "white"),
+    panel.spacing = unit(0 , 'lines')
+  ) + 
+  labs(
+    x = "Month", 
+    y = ""
+  )
+
+nstemi_per_bin_plot
 
 ```
