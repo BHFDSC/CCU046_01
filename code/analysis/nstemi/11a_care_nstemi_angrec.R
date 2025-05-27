@@ -290,11 +290,11 @@ anova_1to5 <- as.data.frame(anova_1to5)
 
 write.csv(
   mod_out, 
-  file = file.path(outcome_folder, "11c_care_nstemi_angrec_mod1to5.csv")
+  file = file.path(outcome_folder, "11a_care_nstemi_angrec_mod1to5.csv")
 )
 write.csv(
   anova_1to5, 
-  file.path(outcome_folder, "11c_care_nstemi_angrec_anova1to5.csv")
+  file.path(outcome_folder, "11a_care_nstemi_angrec_anova1to5.csv")
 )
 
 # Combine models 5 (binary) and 6
@@ -315,12 +315,12 @@ dim(mod_out_int)
 
 write.csv(
   mod_out_int, 
-  file = file.path(outcome_folder, "11c_care_nstemi_angrec_mod_int.csv")
+  file = file.path(outcome_folder, "11a_care_nstemi_angrec_mod_int.csv")
 )
 
 anova_int <- anova(mod_5_bin, mod_5_int)
 
 write.csv(
   anova_int,
-  file = file.path(outcome_folder, "11c_care_nstemi_angrec_anova_int.csv")
+  file = file.path(outcome_folder, "11a_care_nstemi_angrec_anova_int.csv")
 ) 
