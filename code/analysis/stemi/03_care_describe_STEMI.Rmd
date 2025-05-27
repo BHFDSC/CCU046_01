@@ -1,0 +1,1167 @@
+---
+author: "K. Fleetwood"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+title: "Baseline characteristics table for STEMI"
+---
+  
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+
+## required packages
+library(tidyverse)
+library(DBI)
+library(dbplyr)
+library(dplyr)
+library(janitor)
+library(knitr)
+library(arsenal)
+library(lubridate)
+library(bit64)
+library(ggh4x) # hacks for ggplot
+
+home_folder <- "D:\\PhotonUser\\My Files\\Home Folder\\"
+ccu046_01_folder <- file.path(home_folder, "CCU046_01", "Final 2025")
+bc_folder <- file.path(ccu046_01_folder, "baseline_characteristics")
+cohort_folder <- file.path(home_folder, "CCU046_02", "Processed data")
+r_folder <- file.path(home_folder, "r")
+
+# Additional tableby functions to help with rounding to 5
+source(file.path(r_folder, "tableby_functions_19Jan24.R"))  
+# Additional functions to help with rounding to 5
+source(file.path(r_folder, "output_functions_11Jul24.R")) 
+```
+
+```{r load_data, include=FALSE}
+
+cohort <- readRDS(file = file.path(cohort_folder, "01_cohort.rds"))
+
+st_deviation_no <- 
+  c("No acute changes", "Left bundle branch block", "T wave changes only",
+    "Other acute abnormality")
+cohort <- 
+  cohort %>%
+  mutate(
+    st_deviation = 
+      case_when(
+        ecg %in% st_deviation_no  ~ "No",
+        ecg %in% c("ST segment elevation", "ST segment depression") ~ "Yes",
+        is.na(ecg) ~ as.character(NA)
+      ), 
+    crt_log = log(creatinine),
+    call_to_balloon = as.numeric(call_to_balloon),
+    door_to_balloon = as.numeric(door_to_balloon),
+    mi_event_month = floor_date(mi_event_date, "month")
+  )
+
+# Tidy initial reperfusion treatment
+irt_lvls <- c("None",   
+              "Thrombolytic treatment",
+              "pPCI in house",                                            
+              "Referred for consideration for pPCI elsewhere", 
+              "pPCI already was performed at the interventional hospital")
+
+cohort <- 
+  cohort %>%
+  mutate(
+    initial_reperfusion_treatment = substring(initial_reperfusion_treatment, 4, 200),
+    initial_reperfusion_treatment = ifelse(initial_reperfusion_treatment %in% "Unknown", NA, initial_reperfusion_treatment),
+    initial_reperfusion_treatment = factor(initial_reperfusion_treatment, levels = irt_lvls)
+  )
+
+# Individual secondary prevention medications
+med_lvls <- c("Yes", "Contraindicated", "Patient declined treatment",
+              "Not applicable", "Not indicated", "No")
+
+cohort <- 
+  cohort %>% 
+  mutate(
+    aspirin = substring(discharged_on_aspirin, 4, 100),
+    aspirin = ifelse(aspirin %in% "Unknown", as.character(NA), aspirin),
+    aspirin = factor(aspirin, levels = med_lvls),
+    # 
+    bb = substring(discharged_on_beta_blocker, 4, 100),
+    bb = ifelse(bb %in% "Unknown", as.character(NA), bb),
+    bb = factor(bb, levels = med_lvls), 
+    # 
+    statin = substring(discharged_on_statin, 4, 100),
+    statin = ifelse(statin %in% "Unknown", as.character(NA), statin),
+    statin = factor(statin, levels = med_lvls), 
+    #
+    ace = substring(discharged_on_ace_i, 4, 100),
+    ace = ifelse(ace %in% "Unknown", as.character(NA), ace),
+    ace = factor(ace, levels = med_lvls), 
+    #
+    thieno = substring(discharged_on_thieno_inhibitor, 4, 100), 
+    thieno = ifelse(thieno %in% "Unknown", as.character(NA), thieno),
+    thieno = factor(thieno, levels = med_lvls), 
+    #
+    tica   = substring(discharged_on_ticagrelor, 4, 100), 
+    tica = ifelse(tica %in% "Unknown", as.character(NA), tica),
+    tica = factor(tica, levels = med_lvls)
+  )
+
+# Call to balloon in minutes
+# error in derivation door_to_balloon is actually call_to_door
+cohort <- 
+  cohort %>%
+  mutate(
+    ctb_min = call_to_balloon/60,
+    ctb_120 = ctb_min < 120,
+    ctb_150 = ctb_min < 150, 
+    door_to_balloon = call_to_balloon - door_to_balloon,
+    dtb_min = door_to_balloon/60,
+    dtb_60 = dtb_min < 60,
+    dtb_90 = dtb_min < 90,
+  )
+
+labels(cohort) <-
+  c(
+    crt_log = "log [Creatinine (micromol/L)]",
+    st_deviation = "ST deviation",
+    aspirin = "Discharged on aspirin",
+    bb      = "Discharged on beta blocker",
+    statin  = "Discharged on statin",
+    ace     = "Discharged on ACE inhibitor",
+    thieno  = "Discharged on thienopyridine",
+    tica    = "Discharged on ticagrelor",
+    ctb_min = "Call to balloon (minutes)",
+    ctb_120 = "Call to balloon within 120 mins",
+    ctb_150 = "Call to ballon within 150 mins",
+    dtb_min = "Door to balloon (minutes)",
+    dtb_60 = "Door to balloon within 60 mins",
+    dtb_90 = "Door to ballon within 90 mins"
+  )
+
+# Create binary SMI variable
+cohort <-
+  cohort %>%
+  mutate(
+    smi_bin =
+      case_when(
+        smi %in% c("Schizophrenia", "Bipolar disorder", "Depression") ~ "Mental illness",
+        smi %in% "No SMI" ~ "No mental illness"
+      ),
+    smi_bin = factor(smi_bin, levels = c("No mental illness", "Mental illness"))
+  )
+
+```
+
+# Background
+This CCU046_01 output includes descriptive tables prepared for a publication about severe mental illness and receipt of care following myocardial infarction. The output has been created from Myocardial Ischaemia National Audit Project (MINAP) data linked to HES, GDPPR, death records and COVID-19 surveillance data.
+
+# Key cohorts
+
+```{r stemi_key, results = "asis"}
+
+# Full cohort
+stemi <- filter(cohort, mi_type %in% "STEMI")
+stemi_n <- stemi %>% nrow()
+
+# Define complete cases flags
+stemi <- 
+  stemi %>%
+  mutate(
+    cc = !is.na(imd_2019)   & !is.na(ethnic_5) & !is.na(cardiogenic_shock) &
+         !is.na(cardiac_arrest) & !is.na(creatinine) & !is.na(sbp) & 
+         !is.na(heart_rate) &  !is.na(procode3),
+    cc2 = !is.na(imd_2019) & !is.na(ethnic_5) & !is.na(procode3)
+  )
+
+# Full cohort, complete cases 
+stemi_cc <- stemi %>% filter(cc)
+stemi_cc_n <- stemi_cc %>% nrow()
+
+# Full cohort, complete cases (sensitivity analysis)
+stemi_cc2   <- stemi %>% filter(cc2)
+stemi_cc2_n <- stemi_cc2 %>% nrow()
+
+stemi <- stemi %>% mutate(ctb_miss = is.na(call_to_balloon))
+
+# Call to balloon within 120/150 minutes --------------------------------------
+# - underwent primary PCI
+# - CTB available and within range
+ppci <- 
+  c("pPCI in house", "Referred for consideration for pPCI elsewhere",
+    "pPCI already was performed at the interventional hospital")
+
+# Call to balloon times should be measured in minutes, but they are measured in seconds
+# (based on cross-reference to MINAP report)
+# Exclude call to balloon times less than zero and call to balloon times greater
+#   than 31536000 (equivalent to 365 days)
+stemi_ctb <- 
+  stemi %>%
+  filter(
+    initial_reperfusion_treatment %in% ppci,
+    !is.na(call_to_balloon),
+    call_to_balloon > 0,
+    call_to_balloon <= 31536000
+  )
+stemi_ctb_n <- stemi_ctb %>% nrow()
+
+# CTB, complete cases
+stemi_ctb_cc <- stemi_ctb %>% filter(cc)
+stemi_ctb_cc_n <- stemi_ctb_cc %>% nrow()
+
+# CTB, complete cases (sensitivity analysis)
+stemi_ctb_cc2 <- stemi_ctb %>% filter(cc2)
+stemi_ctb_cc2_n <- stemi_ctb_cc2 %>% nrow()
+
+# Door to balloon within 60/90 minutes ----------------------------------------
+# - underwent primary PCI
+# - CTB available and within range
+
+stemi_dtb <- 
+  stemi %>%
+  filter(
+    initial_reperfusion_treatment %in% ppci,
+    !is.na(door_to_balloon),
+    door_to_balloon > 0,
+    door_to_balloon <= 31536000
+  )
+stemi_dtb_n <- stemi_dtb %>% nrow()
+
+stemi_dtb_cc <- stemi_dtb %>% filter(cc)
+stemi_dtb_cc_n <- stemi_dtb_cc %>% nrow()
+
+stemi_dtb_cc2 <- stemi_dtb %>% filter(cc2)
+stemi_dtb_cc2_n <- stemi_dtb_cc2 %>% nrow()
+
+# Cardiac rehabilitation ------------------------------------------------------
+# - Discharged home, cardiac rehab yes /no / patient declined
+stemi_rehab <- 
+  stemi %>% 
+  filter(
+    discharge_destination %in% "Home",
+    cardiac_rehab %in% c("Yes", "No", "Patient declined")
+  )
+stemi_rehab_n <- stemi_rehab %>% nrow()
+
+stemi_rehab_cc <- filter(stemi_rehab, cc)
+stemi_rehab_cc_n <- stemi_rehab_cc %>% nrow()
+
+stemi_rehab_cc2 <- filter(stemi_rehab, cc2)
+stemi_rehab_cc2_n <- stemi_rehab_cc2 %>% nrow()
+
+# Secondary prevention --------------------------------------------------------
+# - Discharged home, secondary prevention not missing
+stemi_prev <- 
+  stemi %>%
+  filter(
+    discharge_destination %in% "Home",
+    !is.na(prev_all)
+  )
+stemi_prev_n <- stemi_prev %>% nrow()
+
+stemi_prev_cc <- stemi_prev %>% filter(cc)
+stemi_prev_cc_n <- stemi_prev_cc %>% nrow()
+
+stemi_prev_cc2 <- stemi_prev %>% filter(cc2)
+stemi_prev_cc2_n <- stemi_prev_cc2 %>% nrow()
+
+# Create table
+key_cohorts <- 
+  data.frame(
+    cohort = 
+      c("Full cohort", "Call to balloon", "Door to balloon",
+        "Cardiac rehabilitation", "Secondary prevention medication"),
+    n = 
+      c(stemi_n, stemi_ctb_n, stemi_dtb_n, stemi_rehab_n, stemi_prev_n),
+    n_cc = 
+      c(stemi_cc_n, stemi_ctb_cc_n, stemi_dtb_cc_n, stemi_rehab_cc_n, stemi_prev_cc_n),
+    n_cc2 = 
+       c(stemi_cc2_n, stemi_ctb_cc2_n, stemi_dtb_cc2_n, stemi_rehab_cc2_n, stemi_prev_cc2_n)
+  )
+
+key_cohorts <- 
+  key_cohorts %>%
+  mutate(
+    n_rnd = rnd5(n),
+    #
+    n_cc_rnd = rnd5(n_cc),
+    per_cc = round(100*n_cc_rnd/n_rnd, digits = 1),
+    n_cc_rnd_fmt = paste0(format(n_cc_rnd, digits=6), " (", per_cc, "%)"),
+    #
+    n_cc2_rnd = rnd5(n_cc2),
+    per_cc2 = round(100*n_cc2_rnd/n_rnd, digits = 1),
+    n_cc2_rnd_fmt = paste0(format(n_cc2_rnd, digits=6), " (", per_cc2, "%)")
+  )
+
+kable(
+  select(key_cohorts, cohort, n_rnd, n_cc_rnd_fmt, n_cc2_rnd_fmt), 
+  caption = "STEMI: Key cohorts",
+  col.names = c("Cohort", "N", "Complete cases", "Complete cases (SA)")
+)
+```
+
+For the main analyses, the complete cases are based on IMD decile, ethnicity, cardiogenic shock, cardiac arrest, creatinine, SBP, heart rate
+and hospital.
+
+In a sensitivity analysis (SA) excluding the MI characteristics, the complete cases analyses are based on IMD decile, ethnicity and hospital only.
+
+```{r stemi_smi, results = "asis"}
+
+# Function to create summary of cohort by smi
+smi_fun <- function(df) {
+  
+  df_n <- nrow(df)
+  
+  out <- 
+    df %>% 
+    tabyl(smi) %>% 
+    adorn_pct_formatting() %>%
+    mutate(
+      n_rnd = rnd5(n),
+      per_rnd = round(100*n_rnd/df_n, digits=1),
+      n_rnd_fmt = paste0(n_rnd, " (", per_rnd, "%)")
+    )
+  
+  out <- pull(out, n_rnd_fmt)
+  out
+  
+}
+
+stemi_smi            <- smi_fun(stemi)
+stemi_cc_smi         <- smi_fun(stemi_cc)
+stemi_cc2_smi        <- smi_fun(stemi_cc2)
+
+stemi_ctb_smi      <- smi_fun(stemi_ctb)
+stemi_ctb_cc_smi   <- smi_fun(stemi_ctb_cc)
+stemi_ctb_cc2_smi  <- smi_fun(stemi_ctb_cc2)
+
+stemi_dtb_smi     <- smi_fun(stemi_dtb)
+stemi_dtb_cc_smi  <- smi_fun(stemi_dtb_cc)
+stemi_dtb_cc2_smi <- smi_fun(stemi_dtb_cc2)
+
+stemi_rehab_smi      <- smi_fun(stemi_rehab)
+stemi_rehab_cc_smi   <- smi_fun(stemi_rehab_cc)  
+stemi_rehab_cc2_smi  <- smi_fun(stemi_rehab_cc2) 
+
+stemi_prev_smi      <- smi_fun(stemi_prev)
+stemi_prev_cc_smi   <- smi_fun(stemi_prev_cc)  
+stemi_prev_cc2_smi  <- smi_fun(stemi_prev_cc2)  
+
+# STEMI cohorts by SMI
+stemi_cohorts_smi <- 
+  rbind(
+    stemi_smi,
+    stemi_cc_smi,
+    stemi_cc2_smi,
+    #
+    stemi_ctb_smi, 
+    stemi_ctb_cc_smi,
+    stemi_ctb_cc2_smi,
+    #
+    stemi_dtb_smi, 
+    stemi_dtb_cc_smi,
+    stemi_dtb_cc2_smi,
+    #
+    stemi_rehab_smi, 
+    stemi_rehab_cc_smi,
+    stemi_rehab_cc2_smi, 
+    #
+    stemi_prev_smi, 
+    stemi_prev_cc_smi,
+    stemi_prev_cc2_smi
+  )
+
+colnames(stemi_cohorts_smi) <- 
+  c("Schizophrenia", "Bipolar disorder", "Depression", "No SMI")
+
+stemi_cohorts_smi <- 
+  as.data.frame(stemi_cohorts_smi) %>%
+  mutate(
+    Cohort = rep(c("Full cohort", "Call to balloon", "Door to balloon",
+        "Cardiac rehabilitation", "Secondary prevention medication"),
+                 each = 3),
+    Including = rep(c("All", "CC", "CC (SA)"), times = 5)
+  ) %>%
+  select(Cohort, Including, Schizophrenia, `Bipolar disorder`, Depression, `No SMI`)
+
+kable(stemi_cohorts_smi, caption = "STEMI cohorts by SMI", row.names = FALSE)
+```
+CC: complete cases, CC: complete cases (sensitivity analysis)
+
+# Full cohort (including missing data)
+
+```{r stemi_base, results = "asis"}
+
+tab1_cntrls <-
+  tableby.control(
+    numeric.stats = c("meansd","medianrange_kf" , "n_per_miss_5"), # 
+    cat.stats = c("countpct_5"),
+    cat.simplify = FALSE
+  )
+
+# Baseline characteristics table based on full STEMI cohort
+tab1_stemi <-
+  tableby(
+    smi ~
+      age_mi + sex +
+      includeNA(imd_2019, label = "Missing") +
+      includeNA(ethnic_5, label = "Missing") +
+      mi_event_year + mi_wd + mi_on + procode3_miss +
+      comorb_angina + comorb_mi +
+      hx_pci +
+      comorb_hf +  comorb_diab +
+      comorb_crf + comorb_cevd +
+      includeNA(cardiogenic_shock, label = "Missing") +
+      includeNA(ecg, label = "Missing") +
+      includeNA(st_deviation, label = "Missing") +
+      includeNA(cardiac_arrest, label = "Missing") +
+      includeNA(cardiac_enzymes_elevated, label = "Missing") +
+      creatinine + crt_log + sbp + heart_rate +
+      covid +
+      includeNA(bmi_cat) + includeNA(smoking_cat) +
+      includeNA(discharge_destination) +
+      includeNA(initial_reperfusion_treatment) +
+      ctb_min +
+      includeNA(ctb_120) +
+      includeNA(ctb_150) +
+      dtb_min +
+      includeNA(dtb_60) +
+      includeNA(dtb_90) +
+      includeNA(cardiac_rehab) +
+      includeNA(prev_all) +
+      includeNA(aspirin) +
+      includeNA(bb) +
+      includeNA(statin) +
+      includeNA(ace) +
+      includeNA(thieno) +
+      includeNA(tica),
+    data = stemi,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(meansd = 'Mean (SD)',
+           #tableby_sum = 'Total',
+           medianrange_kf = 'Median [IQR]',
+           n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab1_stemi$tables$smi$y$stats <- 5*round(tab1_stemi$tables$smi$y$stats/5)
+
+summary(
+  tab1_stemi,
+  title = "Baseline characteristics for the STEMI cohort, counts rounded to the nearest 5")
+
+write.csv(
+  summary(tab1_stemi, text = NULL),
+  file = file.path(bc_folder, "03_stemi_full_baseline.csv")
+)
+```
+
+# Outcomes
+
+## Initial reperfusion treatment 
+
+```{r sum_irt, results = "asis"}
+
+# Summary of initial reperfusion treatment
+tab_irt <-
+  tableby(
+    smi ~ includeNA(initial_reperfusion_treatment),
+    data = stemi,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_irt$tables$smi$y$stats <- 5*round(tab_irt$tables$smi$y$stats/5)
+
+summary(
+  tab_irt,
+  title = "Initial reperfusion treatment amongst patients with STEMI, counts rounded to the nearest 5")
+
+# Reason treatment not given
+# - Should be completed when initial reperfusion treatment is none
+stemi <- 
+  stemi %>%
+  mutate(
+     reason_treatment_not_given = 
+       ifelse(
+          reason_treatment_not_given %in% "9. Unknown",
+          NA,
+          reason_treatment_not_given
+       )
+  )
+
+tab_rsn <-
+  tableby(
+    smi ~ includeNA(reason_treatment_not_given),
+    data = filter(stemi, initial_reperfusion_treatment %in% "None"),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rsn$tables$smi$y$stats <- 5*round(tab_rsn$tables$smi$y$stats/5)
+
+summary(
+  tab_rsn,
+  title = "Reason treatment not given amongst patients with STEMI where initial reperfusion treatement was recorded as 'none', counts rounded to the nearest 5")
+```
+
+## Call to balloon and door to balloon
+
+```{r out_ttb, results = "asis"}
+
+stemi_ctb_out <- 
+  filter(
+    stemi, 
+    initial_reperfusion_treatment %in% ppci
+  ) %>%
+  mutate(
+    ctb_120 = 
+      ifelse(
+        is.na(call_to_balloon)|call_to_balloon<=0|call_to_balloon > 31536000,
+        NA,
+        ctb_120),
+    ctb_150 = 
+      ifelse(
+        is.na(call_to_balloon)|call_to_balloon<=0|call_to_balloon > 31536000,
+        NA,
+        ctb_150),
+    dtb_60 = 
+      ifelse(
+        is.na(door_to_balloon)|door_to_balloon<=0|door_to_balloon > 31536000,
+        NA,
+        dtb_60),
+    dtb_90 = 
+      ifelse(
+        is.na(door_to_balloon)|door_to_balloon<=0|door_to_balloon > 31536000,
+        NA,
+        dtb_90)
+  )
+
+# Summary of CTB and DTB outcomes amongst people who underwent primary PCI
+tab_ttb <-
+  tableby(
+    smi ~ 
+      includeNA(ctb_120) + 
+      includeNA(ctb_150) + 
+      includeNA(dtb_60) + 
+      includeNA(dtb_90),
+    data = stemi_ctb_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_ttb$tables$smi$y$stats <- 5*round(tab_ttb$tables$smi$y$stats/5)
+
+summary(
+  tab_ttb,
+  title = "Call to balloon and door to balloon targets amongst people who underwent primary PCI, counts rounded to the nearest 5")
+
+# Repeat call to balloon excluding missing
+tab_ctb_cc <-
+  tableby(
+    smi ~ 
+      ctb_120 + 
+      ctb_150,
+    data = filter(stemi_ctb_out, !is.na(ctb_120)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_ctb_cc$tables$smi$y$stats <- 5*round(tab_ctb_cc$tables$smi$y$stats/5)
+
+summary(
+  tab_ctb_cc,
+  title = "Call to balloon targets amongst people who underwent primary PCI, counts rounded to the nearest 5")
+
+# Repeat door to balloon excluding missing
+tab_dtb_cc <-
+  tableby(
+    smi ~ dtb_60 + dtb_90,
+    data = filter(stemi_ctb_out, !is.na(dtb_60)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_dtb_cc$tables$smi$y$stats <- 5*round(tab_dtb_cc$tables$smi$y$stats/5)
+
+summary(
+  tab_dtb_cc,
+  title = "Door to balloon targets amongst people who underwent primary PCI, counts rounded to the nearest 5")
+```
+
+## Referred for cardiac rehabilitation
+
+```{r out_rehab, results = "asis"}
+
+# Two ways to look at cardiac rehab:
+# - Including people who were not indicated (e.g. due to severe comorb)
+# - Exclude the above group, as per the analyses
+# For info, present both ways
+
+# Option 1 -----------------------
+stemi_rehab_out <- filter(stemi, discharge_destination %in% "Home")
+
+tab_rehab <-
+  tableby(
+    smi ~ includeNA(cardiac_rehab),
+    data = stemi_rehab_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rehab$tables$smi$y$stats <- 5*round(tab_rehab$tables$smi$y$stats/5)
+
+summary(
+  tab_rehab,
+  title = "Referral for cardiac rehab amongst patients discharged home, counts rounded to the nearest 5")
+
+# Option 2 ---------------
+stemi_rehab_out2 <- 
+  filter(
+    stemi, 
+    discharge_destination %in% "Home",
+    !cardiac_rehab %in% "Not indicated"
+  )
+
+tab_rehab2 <-
+  tableby(
+    smi ~ includeNA(cardiac_rehab),
+    data = stemi_rehab_out2,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rehab2$tables$smi$y$stats <- 5*round(tab_rehab2$tables$smi$y$stats/5)
+
+summary(
+  tab_rehab2,
+  title = "Referral for cardiac rehab amongst patients discharged home and without cardiac rehabilitation recorded as 'Not indicated', counts rounded to the nearest 5")
+
+## Exclude missing values
+tab_rehab2_cc <-
+  tableby(
+    smi ~ cardiac_rehab,
+    data = filter(stemi_rehab_out2, !is.na(cardiac_rehab)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_rehab2_cc$tables$smi$y$stats <- 5*round(tab_rehab2_cc$tables$smi$y$stats/5)
+
+summary(
+  tab_rehab2_cc,
+  title = "Referral for cardiac rehab amongst patients discharged home and without cardiac rehabilitation recorded as 'Not indicated', counts rounded to the nearest 5")
+```
+
+## Discharged on all secondary prevention medications
+
+```{r out_prev, results = "asis"}
+
+stemi_prev_out <- filter(stemi, discharge_destination %in% "Home") 
+
+# Summary of secondary prevention medication amongst people discharged home
+tab_prev <-
+  tableby(
+    smi ~ includeNA(prev_all),
+    data = stemi_prev_out,
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_prev$tables$smi$y$stats <- 5*round(tab_prev$tables$smi$y$stats/5)
+
+summary(
+  tab_prev,
+  title = "Receipt of all secondary prevention medication amongst patients discharged home, counts rounded to the nearest 5")
+
+# Excluding missing data
+
+# Summary of secondary prevention medication amongst people discharged home
+tab_prev_cc <-
+  tableby(
+    smi ~ prev_all,
+    data = filter(stemi_prev_out, !is.na(prev_all)),
+    control = tab1_cntrls,
+    digits = 1,
+    stats.labels =
+      list(n_per_miss = 'Missing',
+           n_per_miss_5 = 'Missing',
+           Nmiss = 'Missing')
+  )
+tab_prev_cc$tables$smi$y$stats <- 5*round(tab_prev_cc$tables$smi$y$stats/5)
+
+summary(
+  tab_prev_cc,
+  title = "Receipt of all secondary prevention medication amongst patients discharged home, counts rounded to the nearest 5")
+```
+
+## Summary of outcomes by month
+
+```{r out_month, results = "asis"}
+
+# Count of STEMI by month
+stemi_month_adm <- 
+  stemi %>%
+  tabyl(mi_event_month) %>%
+  mutate(
+    outcome = "MI admissions (N)",
+    n_per = rnd5(n)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Call to balloon within 120 minutes
+stemi_month_ctb120 <-
+  filter(stemi_ctb_out, !is.na(ctb_120)) %>%
+  mutate(
+    ctb_120 = ifelse(ctb_120, "Yes", "No")
+  ) %>%
+  tabyl(mi_event_month, ctb_120) %>%
+  mutate(
+    outcome = "Call-to-balloon within 120 minutes (%)",
+    total = Yes + No,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Call to balloon within 150 minutes
+stemi_month_ctb150 <-
+  filter(stemi_ctb_out, !is.na(ctb_150)) %>%
+  mutate(
+    ctb_150 = ifelse(ctb_150, "Yes", "No")
+  ) %>%
+  tabyl(mi_event_month, ctb_150) %>%
+  mutate(
+    outcome = "Call-to-balloon within 150 minutes (%)",
+    total = Yes + No,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Door to balloon within 60 minutes
+stemi_month_dtb60 <- 
+  filter(stemi_ctb_out, !is.na(dtb_60)) %>%
+  mutate(
+    dtb_60 = ifelse(dtb_60, "Yes", "No")
+  ) %>%
+  tabyl(mi_event_month, dtb_60) %>%
+  mutate(
+    outcome = "Door-to-balloon within 60 minutes (%)",
+    total = Yes + No, 
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Door to balloon within 90 minutes
+stemi_month_dtb90 <- 
+  filter(stemi_ctb_out, !is.na(dtb_90)) %>%
+  mutate(
+    dtb_90 = ifelse(dtb_90, "Yes", "No")
+  ) %>%
+  tabyl(mi_event_month, dtb_90) %>%
+  mutate(
+    outcome = "Door-to-balloon within 90 minutes (%)",
+    total = Yes + No, 
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+
+# Referral for cardiac rehabilitation
+stemi_month_rehab <- 
+  filter(stemi_rehab_out2, !is.na(cardiac_rehab)) %>%
+  tabyl(mi_event_month, cardiac_rehab) %>%
+  mutate(
+    outcome = "Referral for rehabilitation (%)",
+    total = Yes + No + `Patient declined`,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+  
+# Secondary prevention medication
+stemi_month_prev <- 
+  filter(stemi_prev_out, !is.na(prev_all)) %>%
+  tabyl(mi_event_month, prev_all) %>%
+  mutate(
+    outcome = "Secondary prevention (%)", 
+    total = Yes + No,
+    n_per = 100*rnd5(Yes)/rnd5(total)
+  ) %>%
+  select(outcome, mi_event_month, n_per)
+  
+# Collate outcomes by month
+stemi_month <- 
+  bind_rows(
+    stemi_month_adm,
+    stemi_month_ctb120,
+    stemi_month_ctb150, 
+    stemi_month_dtb60,
+    stemi_month_dtb90,
+    stemi_month_rehab, 
+    stemi_month_prev
+  ) %>%
+  mutate(
+    outcome = 
+      factor(
+        outcome, 
+        levels = 
+          c("MI admissions (N)",
+            "Call-to-balloon within 120 minutes (%)", 
+            "Call-to-balloon within 150 minutes (%)",
+            "Door-to-balloon within 60 minutes (%)", 
+            "Door-to-balloon within 90 minutes (%)",
+            "Referral for rehabilitation (%)", 
+            "Secondary prevention (%)")
+      )
+  )
+
+# Save outcomes by month
+write.csv(
+  stemi_month, 
+  file.path(bc_folder, "03_stemi_month.csv"),
+  row.names = FALSE
+)
+
+stemi_month_plot <- 
+ggplot(stemi_month, aes(x = mi_event_month, y = n_per)) + 
+  geom_line() + 
+  facet_wrap(
+    vars(outcome),
+    ncol = 1,
+    scales = "free_y",
+    strip.position = "top"
+  ) +
+  scale_x_date(date_labels = "%h %Y", expand = c(0,0)) + 
+  theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = "white"),
+    panel.spacing = unit(0 , 'lines')
+  ) + 
+  labs(x = "Month", y = "")
+
+stemi_month_plot
+```
+
+## Summary of outcomes by 4-month period
+
+```{r out_per, results = "asis"}
+
+# Count of STEMI by period and SMI
+stemi_per_adm <- 
+  stemi %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(
+    outcome = "MI admissions (N)",
+    n_per = rnd5(n)
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Call to balloon within 120 minutes
+stemi_per_ctb120 <-
+  filter(stemi_ctb_out, !is.na(ctb_120)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Call-to-balloon within 120 minutes (%)",
+    total = n(),
+    Yes = sum(ctb_120),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Call to balloon within 150 minutes
+stemi_per_ctb150 <-
+  filter(stemi_ctb_out, !is.na(ctb_150)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Call-to-balloon within 150 minutes (%)",
+    total = n(),
+    Yes = sum(ctb_150),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Door to balloon within 60 minutes
+stemi_per_dtb60 <- 
+  filter(stemi_ctb_out, !is.na(dtb_60)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Door-to-balloon within 60 minutes (%)",
+    total = n(),
+    Yes = sum(dtb_60),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Door to balloon within 90 minutes
+stemi_per_dtb90 <- 
+  filter(stemi_ctb_out, !is.na(dtb_90)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Door-to-balloon within 90 minutes (%)",
+    total = n(),
+    Yes = sum(dtb_90),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+
+# Referral for cardiac rehabilitation
+stemi_per_rehab <- 
+  filter(stemi_rehab_out2, !is.na(cardiac_rehab)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Referral for rehabilitation (%)",
+    total = n(), 
+    Yes = sum(cardiac_rehab %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+  
+# Secondary prevention medication
+stemi_per_prev <- 
+  filter(stemi_prev_out, !is.na(prev_all)) %>%
+  group_by(period_4, smi) %>%
+  summarise(
+    outcome = "Secondary prevention (%)",
+    total = n(), 
+    Yes = sum(prev_all %in% "Yes"),
+    n_per = 100*Yes/total
+  ) %>%
+  select(outcome, period_4, smi, n_per)
+  
+# Collate outcomes by month
+stemi_per <- 
+  bind_rows(
+    stemi_per_adm,
+    stemi_per_ctb120,
+    stemi_per_ctb150, 
+    stemi_per_dtb60,
+    stemi_per_dtb90,
+    stemi_per_rehab, 
+    stemi_per_prev
+  ) %>%
+  mutate(
+    outcome = 
+      factor(
+        outcome, 
+        levels = 
+          c("MI admissions (N)",
+            "Call-to-balloon within 120 minutes (%)", 
+            "Call-to-balloon within 150 minutes (%)",
+            "Door-to-balloon within 60 minutes (%)", 
+            "Door-to-balloon within 90 minutes (%)",
+            "Referral for rehabilitation (%)", 
+            "Secondary prevention (%)")
+      ),
+    period_4_start = paste("1", substring(period_4, 1, 8)),
+    period_4_date = as.Date(period_4_start, format = "%d %b %Y"),
+  )
+
+# Save outcomes by month
+write.csv(
+  stemi_per, 
+  file.path(bc_folder, "03_stemi_period_smi.csv"),
+  row.names = FALSE
+)
+
+stemi_per_plot <- 
+  ggplot(stemi_per, aes(x = period_4_date, y = n_per, color = smi)) + 
+  geom_line() + 
+  facet_wrap(
+    vars(outcome),
+    ncol = 1,
+    scales = "free_y",
+    strip.position = "top"
+  ) +
+  scale_x_date(date_labels = "%h %Y", expand = c(0,0)) + 
+  theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = "white"),
+    panel.spacing = unit(0 , 'lines')
+  ) + 
+  labs(x = "Month", y = "")
+
+stemi_per_plot
+```
+## Summary of outcomes by 4-month period (binary SMI)
+
+```{r out_per_bin, results = "asis"}
+
+# Count of STEMI by period and SMI
+stemi_per_bin_adm <- 
+  stemi %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(
+    outcome = "MI admissions (N)",
+    n_per = rnd5(n)
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per)
+
+# Call to balloon within 120 minutes
+stemi_per_bin_ctb120 <-
+  filter(stemi_ctb_out, !is.na(ctb_120)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Call-to-balloon within 120 minutes (%)",
+    total = n(),
+    Yes = sum(ctb_120),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Call to balloon within 150 minutes
+stemi_per_bin_ctb150 <-
+  filter(stemi_ctb_out, !is.na(ctb_150)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Call-to-balloon within 150 minutes (%)",
+    total = n(),
+    Yes = sum(ctb_150),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Door to balloon within 60 minutes
+stemi_per_bin_dtb60 <- 
+  filter(stemi_ctb_out, !is.na(dtb_60)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Door-to-balloon within 60 minutes (%)",
+    total = n(),
+    Yes = sum(dtb_60),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Door to balloon within 90 minutes
+stemi_per_bin_dtb90 <- 
+  filter(stemi_ctb_out, !is.na(dtb_90)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Door-to-balloon within 90 minutes (%)",
+    total = n(),
+    Yes = sum(dtb_90),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Referral for cardiac rehabilitation
+stemi_per_bin_rehab <- 
+  filter(stemi_rehab_out2, !is.na(cardiac_rehab)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Referral for rehabilitation (%)",
+    total = n(), 
+    Yes = sum(cardiac_rehab %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Secondary prevention medication
+stemi_per_bin_prev <- 
+  filter(stemi_prev_out, !is.na(prev_all)) %>%
+  group_by(period_4, smi_bin) %>%
+  summarise(
+    outcome = "Secondary prevention (%)",
+    total = n(), 
+    Yes = sum(prev_all %in% "Yes"),
+    n_per = 100*Yes/total,
+    n_per_low = 100*prop.test(Yes, total)$conf.int[1],
+    n_per_upp = 100*prop.test(Yes, total)$conf.int[2]
+  ) %>%
+  select(outcome, period_4, smi_bin, n_per, n_per_low, n_per_upp)
+
+# Collate outcomes by month
+stemi_per_bin <- 
+  bind_rows(
+    stemi_per_bin_adm,
+    stemi_per_bin_ctb120,
+    stemi_per_bin_ctb150, 
+    stemi_per_bin_dtb60,
+    stemi_per_bin_dtb90,
+    stemi_per_bin_rehab, 
+    stemi_per_bin_prev
+  ) %>%
+  mutate(
+    outcome = 
+      factor(
+        outcome, 
+        levels = 
+          c("MI admissions (N)",
+            "Call-to-balloon within 120 minutes (%)", 
+            "Call-to-balloon within 150 minutes (%)",
+            "Door-to-balloon within 60 minutes (%)", 
+            "Door-to-balloon within 90 minutes (%)",
+            "Referral for rehabilitation (%)", 
+            "Secondary prevention (%)")
+      ),
+    period_4_start = paste("1", substring(period_4, 1, 8)),
+    period_4_date = as.Date(period_4_start, format = "%d %b %Y"),
+  )
+
+# Save outcomes by month
+write.csv(
+  stemi_per_bin, 
+  file.path(bc_folder, "03_stemi_period_bin_smi.csv"),
+  row.names = FALSE
+)
+
+stemi_per_plot <- 
+  ggplot(stemi_per_bin, aes(x = period_4_date, y = n_per, color = smi_bin)) + 
+  geom_line() + 
+  facet_wrap(
+    vars(outcome),
+    ncol = 1,
+    scales = "free_y",
+    strip.position = "top"
+  ) +
+  scale_x_date(date_labels = "%h %Y", expand = c(0,0)) + 
+  theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = "white"),
+    panel.spacing = unit(0 , 'lines')
+  ) + 
+  labs(x = "Month", y = "")
+
+stemi_per_plot
+```
