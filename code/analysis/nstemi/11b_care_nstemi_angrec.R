@@ -241,11 +241,11 @@ anova_1to4 <- as.data.frame(anova_1to4)
 
 write.csv(
   mod_out, 
-  file = file.path(outcome_folder, "11f_care_nstemi_angrec_mod1to4.csv")
+  file = file.path(outcome_folder, "11b_care_nstemi_angrec_mod1to4.csv")
 )
 write.csv(
   anova_1to4, 
-  file.path(outcome_folder, "11f_care_nstemi_angrec_anova1to4.csv")
+  file.path(outcome_folder, "11b_care_nstemi_angrec_anova1to4.csv")
 )
 
 # Combine models 4 (binary) and 4 (interaction)
@@ -266,12 +266,12 @@ dim(mod_out_int)
 
 write.csv(
   mod_out_int, 
-  file = file.path(outcome_folder, "11f_care_nstemi_angrec_mod_int.csv")
+  file = file.path(outcome_folder, "11b_care_nstemi_angrec_mod_int.csv")
 )
 
 anova_int <- anova(mod_4_bin, mod_4_int)
 
 write.csv(
   anova_int,
-  file = file.path(outcome_folder, "11f_care_nstemi_angrec_anova_int.csv")
+  file = file.path(outcome_folder, "11b_care_nstemi_angrec_anova_int.csv")
 ) 
