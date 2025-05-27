@@ -1,6 +1,6 @@
 # Analysis code for the STEMI cohort
 
-03_care_describe_NSTEMI.Rmd creates the descriptive tables and figures.
+03_care_describe_STEMI.Rmd creates the descriptive tables and figures.
 
 The remainder of the scripts run the mixed effects logistic regression models. There is one pair of scripts for each outcome and within each pair of scripts, (a) runs the main analysis and (b) runs the sensitivity analysis. The number at the start of each file name corresponds to the outcome as follows:
 
