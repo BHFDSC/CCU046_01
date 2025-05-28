@@ -25,8 +25,8 @@ References:
 
 ## Contents
 
-* [View the analysis code used in NHS Digital's TRE for England](https://github.com/BHFDSC/CCU046_01/tree/main/code)
-* [View the phenotyping algorithms and codelists used in NHS Digital's TRE for England](https://github.com/BHFDSC/CCU046_01/tree/main/phenotypes)
+* [View the analysis code used in NHS England's SDE for England](https://github.com/BHFDSC/CCU046_01/tree/main/code)
+* [View the phenotyping algorithms and codelists used in NHS England's SDE for England](https://github.com/BHFDSC/CCU046_01/tree/main/phenotypes)
 
 ## Project approval
 
