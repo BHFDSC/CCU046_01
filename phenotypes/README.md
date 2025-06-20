@@ -1,4 +1,4 @@
-# Mental illness
+# Mental disorders
 
 ## ICD-10 codelists
 For schizophrenia, bipolar disorder and depression we used codelists previously published by the authors in Jackson CA, Kerssens J, Fleetwood K, Smith DJ, Mercer SW, Wild SH. Incidence of ischaemic heart disease and stroke among people with psychiatric disorders: retrospective cohort study. The British Journal of Psychiatry. 2020;217(2):442-449. doi:10.1192/bjp.2019.250.
@@ -6,7 +6,7 @@ For schizophrenia, bipolar disorder and depression we used codelists previously 
 ## SNOMED codelists
 The General Practice Extraction Service Data for Pandemic Planning and Research (GDPPR) dataset includes a subset of all SNOMED codes used in the United Kingdom. The subset of codes included is defined by the primary care domain (PCD) reference set [1]. The PCD reference set is also used by the Quality and Outcomes Framework (QOF) and current and historical versions of the reference set are available from NHS England [2]. The available SNOMED codes are grouped into code clusters [1].
 
-To develop our SNOMED codelists for mental illness we extracted codes from all of the clusters related to relevant mental illness diagnoses: DEPR_COD (depression diagnosis codes), DEPRES_COD (depression resolved codes) and MH_COD (psychosis and schizophrenia and bipolar affective disease codes) from version 47.1 of the QOF cluster list (which was the most recent version at the time of developing the SMI codelists) [3]. Additionally, we mapped existing Read v2 and Clinical Terms Version 3 codelists [4] for schizophrenia, bipolar disorder and depression to SNOMED, and identified codes available within the GDPPR dataset. We collated all SNOMED codes identified from the clusters, and from the mapping process and then identified codes for each of schizophrenia, bipolar disorder or depression.
+To develop our SNOMED codelists for mental disorders we extracted codes from all of the clusters related to relevant mental disorder diagnoses: DEPR_COD (depression diagnosis codes), DEPRES_COD (depression resolved codes) and MH_COD (psychosis and schizophrenia and bipolar affective disease codes) from version 47.1 of the QOF cluster list (which was the most recent version at the time of developing the SMI codelists) [3]. Additionally, we mapped existing Read v2 and Clinical Terms Version 3 codelists [4] for schizophrenia, bipolar disorder and depression to SNOMED, and identified codes available within the GDPPR dataset. We collated all SNOMED codes identified from the clusters, and from the mapping process and then identified codes for each of schizophrenia, bipolar disorder or depression.
 
 # Medical history
 
