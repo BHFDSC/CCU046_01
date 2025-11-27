@@ -1,5 +1,7 @@
 # Severe mental illness and receipt of acute cardiac care following myocardial infarction
 
+**Kelly Fleetwood, John Nolan, Colin Berry, Debbie Cavers, Stewart W Mercer, Sandosh Padmanabhan, Daniel J Smith, Robert Stewart, Amanda Vettini, Caroline A Jackson, on behalf of the CVD-COVID-UK/COVID-IMPACT Consortium**
+
 ## Project description
 
 Severe mental illness (SMI), which includes schizophrenia, bipolar disorder and major depression, affects about one in ten people. People with SMI die 10-20 years sooner than people without SMI (Fleetwood et al. 2025, Hjorthoj et al. 2017). This is mainly due to poorer physical health, in particular a higher risk of cardiovascular disease (CVD), including myocardial infarction (MI) (Ajetunmobi et al. 2013, Correll et al. 2017).
@@ -21,7 +23,7 @@ References:
 
 
 ## How to cite this work
-> Citation details to follow
+Preprint available here: https://doi.org/10.1101/2025.11.21.25340556
 
 ## Contents
 
