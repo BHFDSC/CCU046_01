@@ -1,3 +1,5 @@
+A list of all phenotypes with links to the HDR UK Phenoptype Library is provided in [phenotypes.csv](https://github.com/BHFDSC/CCU046_01/blob/main/phenotypes/phenotypes.csv). Codelists that the authors developed for this project are available in CSV format in the [CSV](https://github.com/BHFDSC/CCU046_01/tree/main/phenotypes/CSV) folder. A more detailed description of the phenotypes is provided below.
+
 # Mental disorders
 
 ## ICD-10 codelists
